@@ -1,4 +1,4 @@
-from utils import get_token_predictions
+from utils import get_model_responses
 import pandas as pd
 
 def main():
@@ -9,11 +9,10 @@ def main():
     model_list = ["Qwen/Qwen2.5-0.5B", "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"]
 
     # Get next token predictions
-    get_token_predictions(model_list,
-                          input_df['sentence_text'],
-                          command_prompt=None,
-                          num_return_sequences=1,
-                          output_dir='../../output')
+    get_model_responses(model_list,
+                        input_df['sentence_text'],
+                        command_prompt=None,
+                        output_dir='../../output')
 
 if __name__ == "__main__":
     main()
