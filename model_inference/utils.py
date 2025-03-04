@@ -8,7 +8,7 @@ import gc
 from tqdm.notebook import tqdm
 
 
-def get_token_predictions(model_name, prompts, max_length, batch_size, num_return_sequences, temperatures):
+def get_token_predictions(model_name, prompts, max_new_tokens, batch_size, num_return_sequences, temperatures):
     """
     Get model next token predictions for a set of prompts and format results in a table.
 
@@ -35,55 +35,52 @@ def get_token_predictions(model_name, prompts, max_length, batch_size, num_retur
     # Store results
     results = []
 
-    # Process prompts in batches for each temperature
+    # Process prompts for each temperature
     for temp in temperatures:
-        for i in tqdm(range(0, len(prompts), batch_size), desc="Processing batches"):
-            batch_prompts = prompts.iloc[i:i + batch_size]
-            batch_ids = batch_prompts.index.tolist()
+        print(f"Processing with temperature: {temp}")
+        try:
+            # Generate responses for all prompts
+            outputs = pipe(
+                prompts.tolist(),
+                batch_size=batch_size,
+                temperature=temp,
+                num_beams=5,
+                max_new_tokens=max_new_tokens,
+                num_return_sequences=num_return_sequences,
+                pad_token_id=pipe.tokenizer.pad_token_id,
+                early_stopping=True,
+                eos_token_id=pipe.tokenizer.eos_token_id,
+            )
 
-            try:
-                # Generate responses for the batch
-                outputs = pipe(
-                    batch_prompts.tolist(),
-                    device=0 if torch.cuda.is_available() else -1,
-                    num_beams=5,
-                    max_length=max_length,
-                    num_return_sequences=num_return_sequences,
-                    pad_token_id=pipe.tokenizer.pad_token_id,
-                    early_stopping=True,
-                    eos_token_id=pipe.tokenizer.eos_token_id,
-                    temperature=temp
-                )
+            # Process each response
+            for prompt_id, prompt_outputs, prompt_text in zip(prompts.index, outputs, prompts):
+                for seq_idx, output in enumerate(prompt_outputs):
+                    generated_text = output['generated_text']
+                    next_tokens = generated_text[len(prompt_text):].strip()
 
-                # Process each response
-                for j, (prompt_id, prompt_outputs) in enumerate(zip(batch_ids, outputs)):
-                    for seq_idx, output in enumerate(prompt_outputs):
-                        generated_text = output['generated_text']
-                        next_tokens = generated_text[len(batch_prompts.iloc[j]):].strip()
-
-                        results.append({
-                            'Prompt ID': prompt_id,
-                            'Temperature': temp,
-                            'Prompt': batch_prompts.iloc[j],
-                            'Response': next_tokens,
-                            'Sequence': seq_idx + 1 if num_return_sequences > 1 else None
-                        })
-            
-            except Exception as e:
-                # Handle errors gracefully
-                for prompt_id in batch_ids:
                     results.append({
                         'Prompt ID': prompt_id,
                         'Temperature': temp,
-                        'Prompt': prompts.loc[prompt_id],
-                        'Response': f"Error: {str(e)}",
-                        'Sequence': None
+                        'Prompt': prompt_text,
+                        'Response': next_tokens,
+                        'Sequence': seq_idx + 1 if num_return_sequences > 1 else None
                     })
-            
-            # Clear CUDA cache after processing each batch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            gc.collect()
+        
+        except Exception as e:
+            # Handle errors gracefully
+            for prompt_id, prompt_text in zip(prompts.index, prompts):
+                results.append({
+                    'Prompt ID': prompt_id,
+                    'Temperature': temp,
+                    'Prompt': prompt_text,
+                    'Response': f"Error: {str(e)}",
+                    'Sequence': None
+                })
+        
+        # Clear CUDA cache after processing
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
 
     # Create DataFrame
     df = pd.DataFrame(results)
@@ -147,7 +144,7 @@ def export_completions_to_csv(
     return full_path
 
 
-def get_model_responses(model_list, prompts, command_prompt=None, max_length=50, batch_size=32, num_return_sequences=1, temperatures=[0.5, 1.0, 1.5], output_dir=None):
+def get_model_responses(model_list, prompts, command_prompt=None, max_new_tokens=50, batch_size=32, num_return_sequences=1, temperatures=[0.5, 1.0, 1.5], output_dir=None):
     # Add command prompt
     if command_prompt:
         prompts = {k: command_prompt + v for k, v in prompts.items()}
@@ -161,7 +158,7 @@ def get_model_responses(model_list, prompts, command_prompt=None, max_length=50,
         results_df = get_token_predictions(
             model_name=model_name,
             prompts=prompts,
-            max_length=max_length,
+            max_new_tokens=max_new_tokens,
             batch_size=batch_size,
             num_return_sequences=num_return_sequences,
             temperatures=temperatures,
